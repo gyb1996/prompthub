@@ -408,12 +408,14 @@ function renderPrompts() {
           const isSelected = state.selectedPromptIds.has(prompt.id);
           return `
             <article class="prompt-card ${prompt.id === state.selectedPromptId ? "active" : ""} ${isSelected ? "selected" : ""}" data-prompt-id="${prompt.id}" role="button" tabindex="0" aria-label="${escapeHtml(prompt.title)}">
-              <button class="prompt-select-button ${isSelected ? "selected" : ""}" data-select-prompt-id="${prompt.id}" type="button" aria-pressed="${isSelected}" aria-label="${isSelected ? "取消选择" : "选择"}${escapeHtml(prompt.title)}">
-                ${isSelected ? "✓" : ""}
-              </button>
               <span class="prompt-card-title">
                 <h3>${escapeHtml(prompt.title)}</h3>
-                <span class="card-star">${prompt.isFavorite ? "★" : "☆"}</span>
+                <span class="card-inline-actions">
+                  <span class="card-star">${prompt.isFavorite ? "★" : "☆"}</span>
+                  <button class="prompt-select-button ${isSelected ? "selected" : ""}" data-select-prompt-id="${prompt.id}" type="button" aria-pressed="${isSelected}" aria-label="${isSelected ? "取消选择" : "选择"}${escapeHtml(prompt.title)}">
+                    ${isSelected ? "✓" : ""}
+                  </button>
+                </span>
               </span>
               <span class="prompt-summary">${escapeHtml(prompt.summary || "暂无描述")}</span>
               <span class="card-footer">

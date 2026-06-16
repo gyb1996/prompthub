@@ -480,10 +480,8 @@ kbd {
 }
 
 .prompt-select-button {
-  position: absolute;
-  top: 12px;
-  right: 12px;
   display: grid;
+  flex: 0 0 auto;
   place-items: center;
   width: 22px;
   height: 22px;
@@ -505,7 +503,7 @@ kbd {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 42px;
+  gap: 14px;
 }
 
 .prompt-card h3 {
@@ -520,6 +518,13 @@ kbd {
   color: var(--blue);
   flex: 0 0 auto;
   font-size: 18px;
+}
+
+.card-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
 }
 
 .prompt-summary {
