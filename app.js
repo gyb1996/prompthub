@@ -413,10 +413,7 @@ function renderPrompts() {
               </button>
               <span class="prompt-card-title">
                 <h3>${escapeHtml(prompt.title)}</h3>
-                <span class="card-actions">
-                  <span class="card-star">${prompt.isFavorite ? "★" : "☆"}</span>
-                  <span>•••</span>
-                </span>
+                <span class="card-star">${prompt.isFavorite ? "★" : "☆"}</span>
               </span>
               <span class="prompt-summary">${escapeHtml(prompt.summary || "暂无描述")}</span>
               <span class="card-footer">

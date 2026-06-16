@@ -516,16 +516,10 @@ kbd {
   white-space: nowrap;
 }
 
-.card-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #355b93;
-  font-size: 18px;
-}
-
 .card-star {
   color: var(--blue);
+  flex: 0 0 auto;
+  font-size: 18px;
 }
 
 .prompt-summary {
