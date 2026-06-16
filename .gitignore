@@ -1,5 +1,7 @@
 .DS_Store
 build/
 dist/
+macos/
+package-macos.sh
 node_modules/
 *.log
