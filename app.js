@@ -1057,7 +1057,10 @@ function bindEvents() {
   });
   document.querySelector("#exportButton").addEventListener("click", exportBackupZip);
   document.querySelector("#installButton").addEventListener("click", async () => {
-    if (!state.deferredInstallPrompt) return;
+    if (!state.deferredInstallPrompt) {
+      showToast("当前浏览器暂未提供安装入口，请用 Chrome 或 Edge 在 localhost 或 HTTPS 页面打开");
+      return;
+    }
     state.deferredInstallPrompt.prompt();
     await state.deferredInstallPrompt.userChoice;
     state.deferredInstallPrompt = null;
