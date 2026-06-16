@@ -13,6 +13,7 @@ const state = {
   selectedSceneId: ALL_SCENES,
   selectedPromptId: null,
   selectedVersionId: null,
+  selectedPromptIds: new Set(),
   search: "",
   sort: "updated",
   showAllVersions: false,
@@ -29,6 +30,8 @@ const els = Object.fromEntries(
     "sceneList",
     "promptList",
     "promptCount",
+    "selectVisiblePromptsButton",
+    "deleteSelectedPromptsButton",
     "detailEmpty",
     "detailContent",
     "detailTitle",
@@ -357,6 +360,7 @@ function reconcileSelection() {
   if (state.selectedSceneId !== ALL_SCENES && !state.scenes.some((scene) => scene.id === state.selectedSceneId)) {
     state.selectedSceneId = ALL_SCENES;
   }
+  state.selectedPromptIds = new Set([...state.selectedPromptIds].filter((id) => state.prompts.some((prompt) => prompt.id === id)));
   const prompts = visiblePrompts();
   if (!prompts.some((prompt) => prompt.id === state.selectedPromptId)) state.selectedPromptId = prompts[0]?.id || null;
   const versions = versionsForPrompt(state.selectedPromptId);
@@ -401,8 +405,12 @@ function renderPrompts() {
         .map((prompt) => {
           const scene = state.scenes.find((item) => item.id === prompt.sceneId);
           const tags = [scene?.name, ...(prompt.tags || [])].filter(Boolean).slice(0, 3);
+          const isSelected = state.selectedPromptIds.has(prompt.id);
           return `
-            <button class="prompt-card ${prompt.id === state.selectedPromptId ? "active" : ""}" data-prompt-id="${prompt.id}" type="button">
+            <article class="prompt-card ${prompt.id === state.selectedPromptId ? "active" : ""} ${isSelected ? "selected" : ""}" data-prompt-id="${prompt.id}" role="button" tabindex="0" aria-label="${escapeHtml(prompt.title)}">
+              <button class="prompt-select-button ${isSelected ? "selected" : ""}" data-select-prompt-id="${prompt.id}" type="button" aria-pressed="${isSelected}" aria-label="${isSelected ? "取消选择" : "选择"}${escapeHtml(prompt.title)}">
+                ${isSelected ? "✓" : ""}
+              </button>
               <span class="prompt-card-title">
                 <h3>${escapeHtml(prompt.title)}</h3>
                 <span class="card-actions">
@@ -417,12 +425,17 @@ function renderPrompts() {
                 </span>
                 <span class="card-time">${relativeTime(prompt.updatedAt)}</span>
               </span>
-            </button>
+            </article>
           `;
         })
         .join("")
     : `<div class="empty-state"><div class="empty-icon">P</div><h2>没有匹配结果</h2><p>调整搜索词或新建提示词。</p></div>`;
-  els.promptCount.textContent = `共 ${prompts.length} 条提示词`;
+  const selectedCount = state.selectedPromptIds.size;
+  const allVisibleSelected = prompts.length > 0 && prompts.every((prompt) => state.selectedPromptIds.has(prompt.id));
+  els.promptCount.textContent = selectedCount ? `共 ${prompts.length} 条提示词 · 已选 ${selectedCount} 条` : `共 ${prompts.length} 条提示词`;
+  els.selectVisiblePromptsButton.textContent = allVisibleSelected ? "取消全选" : "全选";
+  els.selectVisiblePromptsButton.disabled = prompts.length === 0;
+  els.deleteSelectedPromptsButton.disabled = selectedCount === 0;
 }
 
 function renderDetail() {
@@ -606,9 +619,27 @@ async function deletePrompt() {
   if (!prompt || !confirm("删除该提示词及全部版本？")) return;
   await Promise.all(versionsForPrompt(prompt.id).map((version) => deleteItem("versions", version.id)));
   await deleteItem("prompts", prompt.id);
+  state.selectedPromptIds.delete(prompt.id);
   state.selectedPromptId = null;
   markDirty();
   showToast("提示词已删除");
+  await refreshData();
+}
+
+async function deleteSelectedPrompts() {
+  const promptIds = [...state.selectedPromptIds].filter((id) => state.prompts.some((prompt) => prompt.id === id));
+  if (!promptIds.length) return;
+  if (!confirm(`删除已选的 ${promptIds.length} 条提示词及其全部版本？`)) return;
+  const versionIds = state.versions.filter((version) => promptIds.includes(version.promptId)).map((version) => version.id);
+  await Promise.all(versionIds.map((id) => deleteItem("versions", id)));
+  await Promise.all(promptIds.map((id) => deleteItem("prompts", id)));
+  if (promptIds.includes(state.selectedPromptId)) {
+    state.selectedPromptId = null;
+    state.selectedVersionId = null;
+  }
+  state.selectedPromptIds.clear();
+  markDirty();
+  showToast(`已删除 ${promptIds.length} 条提示词`);
   await refreshData();
 }
 
@@ -1061,6 +1092,7 @@ function bindEvents() {
 
   els.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value;
+    state.selectedPromptIds.clear();
     reconcileSelection();
     render();
   });
@@ -1073,13 +1105,43 @@ function bindEvents() {
     if (!button) return;
     state.selectedSceneId = button.dataset.sceneId;
     state.selectedPromptId = null;
+    state.selectedPromptIds.clear();
     reconcileSelection();
     render();
   });
+  els.selectVisiblePromptsButton.addEventListener("click", () => {
+    const prompts = visiblePrompts();
+    const allSelected = prompts.length > 0 && prompts.every((prompt) => state.selectedPromptIds.has(prompt.id));
+    if (allSelected) {
+      prompts.forEach((prompt) => state.selectedPromptIds.delete(prompt.id));
+    } else {
+      prompts.forEach((prompt) => state.selectedPromptIds.add(prompt.id));
+    }
+    renderPrompts();
+  });
+  els.deleteSelectedPromptsButton.addEventListener("click", deleteSelectedPrompts);
   els.promptList.addEventListener("click", (event) => {
+    const selectButton = event.target.closest("[data-select-prompt-id]");
+    if (selectButton) {
+      const id = selectButton.dataset.selectPromptId;
+      if (state.selectedPromptIds.has(id)) state.selectedPromptIds.delete(id);
+      else state.selectedPromptIds.add(id);
+      renderPrompts();
+      return;
+    }
     const button = event.target.closest("[data-prompt-id]");
     if (!button) return;
     state.selectedPromptId = button.dataset.promptId;
+    state.selectedVersionId = versionsForPrompt(state.selectedPromptId)[0]?.id || null;
+    state.showAllVersions = false;
+    render();
+  });
+  els.promptList.addEventListener("keydown", (event) => {
+    if (!["Enter", " "].includes(event.key)) return;
+    const card = event.target.closest("[data-prompt-id]");
+    if (!card || event.target.closest("[data-select-prompt-id]")) return;
+    event.preventDefault();
+    state.selectedPromptId = card.dataset.promptId;
     state.selectedVersionId = versionsForPrompt(state.selectedPromptId)[0]?.id || null;
     state.showAllVersions = false;
     render();
@@ -1141,40 +1203,37 @@ async function seedIfEmpty() {
     ["其他", "通用与未分类提示词", "#63708a"],
   ].map(([name, description, color]) => ({ id: uid(), name, description, color, createdAt: now(), updatedAt: now() }));
   const promptData = [
-    [0, "代码重构：函数优化", "优化以下代码的可读性和性能，遵循最佳实践", ["重构", "函数"]],
-    [1, "小红书文案润色", "将以下文案优化为小红书风格，更吸引人", ["小红书", "润色"]],
-    [2, "SQL 查询优化", "优化以下 SQL 查询语句，提高查询效率", ["SQL", "优化"]],
-    [3, "产品需求拆解", "将产品需求拆解为可执行的任务清单", ["需求分析", "规划"]],
-    [4, "周报生成助手", "根据以下内容生成一份简洁的周报", ["周报", "总结"]],
-    [5, "会议纪要整理", "从原始记录中提取决策、风险和待办事项", ["会议", "纪要"]],
+    [3, "产品需求拆解", "将产品想法拆解为目标、用户场景、范围和验收标准", ["需求分析", "PRD"]],
   ].map(([sceneIndex, title, summary, tags], index) => ({
     id: uid(),
     sceneId: sceneData[sceneIndex].id,
     title,
     summary,
     tags,
-    isFavorite: index < 3,
+    isFavorite: true,
     createdAt: new Date(Date.now() - index * 86400000).toISOString(),
     updatedAt: new Date(Date.now() - index * 7200000).toISOString(),
   }));
-  const baseContent = `请优化以下代码的可读性和性能，遵循以下最佳实践：
-1. 使用清晰的命名规范
-2. 减少代码重复
-3. 优化算法复杂度
-4. 添加必要的注释
-5. 遵循 SOLID 原则
+  const baseContent = `请把下面的产品想法整理成一份可执行的需求说明。
 
-代码如下：
-\`\`\`
-// 在这里粘贴你的代码
-\`\`\``;
+请按以下结构输出：
+1. 背景与目标
+2. 目标用户与使用场景
+3. 核心需求范围
+4. 非目标范围
+5. 关键流程
+6. 验收标准
+7. 风险与待确认问题
+
+产品想法：
+{{input}}`;
   const versionData = promptData.flatMap((prompt, promptIndex) =>
-    [0, 1, 2].map((versionIndex) => ({
+    [0].map((versionIndex) => ({
       id: uid(),
       promptId: prompt.id,
-      label: `v3.${2 - versionIndex}`,
-      content: promptIndex === 0 ? baseContent : `${prompt.summary}。\n\n请先分析目标受众和输入内容，再输出结构清晰、可直接使用的结果。`,
-      notes: ["优化了性能建议，补充了算法复杂度分析", "增加了可读性优化建议和命名规范说明", "重构提示词结构，增加最佳实践列表"][versionIndex],
+      label: "v1.0",
+      content: baseContent,
+      notes: "初始产品需求拆解模板",
       model: "通用",
       temperature: "0.3",
       variables: "{{input}}",

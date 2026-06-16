@@ -78,11 +78,15 @@
                 <strong>提示词</strong>
                 <span>(Prompt)</span>
               </div>
-              <select id="sortSelect" class="sort-select" aria-label="提示词排序">
-                <option value="updated">最近更新</option>
-                <option value="title">名称排序</option>
-                <option value="favorite">收藏优先</option>
-              </select>
+              <div class="prompt-list-actions">
+                <button id="selectVisiblePromptsButton" class="text-button compact-action" type="button">全选</button>
+                <button id="deleteSelectedPromptsButton" class="danger-button compact-action" type="button" disabled>删除已选</button>
+                <select id="sortSelect" class="sort-select" aria-label="提示词排序">
+                  <option value="updated">最近更新</option>
+                  <option value="title">名称排序</option>
+                  <option value="favorite">收藏优先</option>
+                </select>
+              </div>
             </div>
             <div id="promptList" class="prompt-list"></div>
             <div id="promptCount" class="prompt-count"></div>

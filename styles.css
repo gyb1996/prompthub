@@ -391,6 +391,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
   min-height: 70px;
   padding: 0 30px;
 }
@@ -413,6 +414,25 @@ kbd {
   font-size: 13px;
 }
 
+.prompt-list-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.compact-action {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.compact-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .prompt-list {
   display: grid;
   align-content: start;
@@ -432,6 +452,7 @@ kbd {
   padding: 18px 18px 15px;
   background: var(--surface);
   color: var(--text);
+  cursor: pointer;
   text-align: left;
   transition:
     border-color 140ms ease,
@@ -443,16 +464,48 @@ kbd {
   box-shadow: var(--shadow);
 }
 
+.prompt-card:focus-visible {
+  outline: 3px solid rgba(8, 102, 255, 0.18);
+  outline-offset: 2px;
+}
+
 .prompt-card.active {
   border-color: var(--blue);
   box-shadow: 0 0 0 1px var(--blue);
+}
+
+.prompt-card.selected {
+  border-color: #6aa2ff;
+  background: var(--surface-blue);
+}
+
+.prompt-select-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--blue);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.prompt-select-button:hover,
+.prompt-select-button.selected {
+  border-color: var(--blue);
+  background: var(--blue-soft);
 }
 
 .prompt-card-title {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
+  gap: 42px;
 }
 
 .prompt-card h3 {
