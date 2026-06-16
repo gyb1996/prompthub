@@ -14,7 +14,10 @@ PromptHub 是一个本地优先的提示词生命周期管理工具。PWA 网页
 
 ## 本地运行
 
+必须在包含 `index.html` 的 PromptHub 项目目录里启动服务：
+
 ```bash
+cd "/Users/yibo/Documents/prompt management"
 python3 -m http.server 5173
 ```
 
@@ -23,6 +26,8 @@ python3 -m http.server 5173
 ```text
 http://localhost:5173
 ```
+
+如果页面显示 `Directory listing for /`，说明服务启动在了上一级目录。进入 PromptHub 项目目录后重新运行上面的命令即可。
 
 ## 数据保存方式
 
@@ -91,7 +96,3 @@ https://你的用户名.github.io/prompthub/
 - 更换浏览器、设备或域名后，数据不会自动迁移。
 - 建议定期导出 JSON，或在支持的浏览器里连接一个本地 JSON 文件并手动保存。
 - File System Access API 主要支持 Chrome、Edge 等 Chromium 浏览器；Safari 和 Firefox 可能只能使用导入/导出备份。
-
-## macOS 应用包
-
-此前生成的 macOS 应用包仍保留在本地 `dist/` 目录。PWA 版本不依赖应用包。

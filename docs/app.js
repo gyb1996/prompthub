@@ -130,40 +130,16 @@ function requestToPromise(request) {
   });
 }
 
-const nativeStore = Boolean(window.promptManagerNative?.enabled && window.webkit?.messageHandlers?.nativeStore);
-const nativeRequests = new Map();
 const fileAccessSupported = "showOpenFilePicker" in window && "showSaveFilePicker" in window;
-
-window.__nativeStoreReceive = (requestId, response) => {
-  const pending = nativeRequests.get(requestId);
-  if (!pending) return;
-  nativeRequests.delete(requestId);
-  if (response?.ok) pending.resolve(response.value);
-  else pending.reject(new Error(response?.error || "本地文件操作失败"));
-};
-
-function nativeRequest(action, payload = {}) {
-  return new Promise((resolve, reject) => {
-    const requestId = uid();
-    nativeRequests.set(requestId, { resolve, reject });
-    window.webkit.messageHandlers.nativeStore.postMessage({ requestId, action, ...payload });
-  });
-}
 
 function store(name, mode = "readonly") {
   return state.db.transaction(name, mode).objectStore(name);
 }
 
-const getAll = (name) => nativeStore ? nativeRequest("getAll", { storeName: name }) : requestToPromise(store(name).getAll());
-const putItem = (name, item) => nativeStore
-  ? nativeRequest("put", { storeName: name, item })
-  : requestToPromise(store(name, "readwrite").put(item));
-const deleteItem = (name, id) => nativeStore
-  ? nativeRequest("delete", { storeName: name, itemId: id })
-  : requestToPromise(store(name, "readwrite").delete(id));
-const clearStore = (name) => nativeStore
-  ? nativeRequest("clear", { storeName: name })
-  : requestToPromise(store(name, "readwrite").clear());
+const getAll = (name) => requestToPromise(store(name).getAll());
+const putItem = (name, item) => requestToPromise(store(name, "readwrite").put(item));
+const deleteItem = (name, id) => requestToPromise(store(name, "readwrite").delete(id));
+const clearStore = (name) => requestToPromise(store(name, "readwrite").clear());
 
 function currentData() {
   return {
@@ -628,10 +604,6 @@ async function chooseSaveFile() {
 }
 
 async function saveWorkingJsonFile() {
-  if (nativeStore) {
-    showToast("应用版会自动写入本地数据文件");
-    return;
-  }
   if (!fileAccessSupported) {
     exportJson();
     showToast("当前浏览器不支持直接保存到指定文件，已改为导出备份");
@@ -658,10 +630,8 @@ function openManageDialog() {
   ]
     .map(([label, count]) => `<div class="stat-card"><strong>${count}</strong><span>${label}</span></div>`)
     .join("");
-  els.storageLocation.textContent = nativeStore
-    ? window.promptManagerNative.dataFile
-    : `浏览器 IndexedDB · ${window.location.origin}`;
-  els.revealStorageButton.textContent = nativeStore ? "在 Finder 中显示" : "导出可见备份";
+  els.storageLocation.textContent = `浏览器 IndexedDB · ${window.location.origin}`;
+  els.revealStorageButton.textContent = "导出备份";
   updateFileStatus();
   els.manageDialog.showModal();
 }
@@ -767,8 +737,7 @@ function bindEvents() {
   document.querySelector("#settingsButton").addEventListener("click", openManageDialog);
   document.querySelector("#manageButton").addEventListener("click", openManageDialog);
   els.revealStorageButton.addEventListener("click", () => {
-    if (nativeStore) nativeRequest("revealData");
-    else exportJson();
+    exportJson();
   });
   els.saveFileFromManageButton.addEventListener("click", async () => {
     try {
@@ -915,7 +884,7 @@ async function seedIfEmpty() {
 async function init() {
   const savedTheme = localStorage.getItem(THEME_KEY);
   if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-  if (!nativeStore) state.db = await openDb();
+  state.db = await openDb();
   setupInstallPrompt();
   registerServiceWorker();
   bindEvents();

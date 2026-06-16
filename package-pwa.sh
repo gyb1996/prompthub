@@ -14,3 +14,7 @@ cp "$ROOT/icons/"*.png "$OUT/icons/"
 
 echo "Built GitHub Pages PWA files in:"
 echo "  $OUT"
+echo ""
+echo "Local preview:"
+echo "  cd \"$ROOT\" && python3 -m http.server 5173"
+echo "  http://localhost:5173/"
