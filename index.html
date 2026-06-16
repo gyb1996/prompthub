@@ -62,7 +62,7 @@
             <label class="outline-button file-button">
               <span aria-hidden="true">⇩</span>
               导入备份
-              <input id="importFile" type="file" accept="application/json,.json" />
+              <input id="importFile" type="file" accept="application/json,.json,application/zip,.zip" multiple />
             </label>
             <button id="exportButton" class="outline-button" type="button"><span aria-hidden="true">⇧</span>导出备份</button>
             <button id="installButton" class="outline-button hidden" type="button"><span aria-hidden="true">＋</span>安装</button>
@@ -102,6 +102,9 @@
                   <div id="tagList" class="tag-list"></div>
                 </div>
                 <div class="detail-header-actions">
+                  <button id="savePromptFileButton" class="mini-icon-button storage-card-button" type="button" title="保存当前提示词 JSON" aria-label="保存当前提示词 JSON">
+                    <span class="storage-card-icon" aria-hidden="true"></span>
+                  </button>
                   <button id="favoritePromptButton" class="star-button" type="button" title="收藏" aria-label="收藏">☆</button>
                   <div class="menu-wrap">
                     <button id="promptMenuButton" class="more-button" type="button" title="更多操作" aria-label="更多操作">•••</button>
@@ -192,15 +195,15 @@
             <button id="revealStorageButton" class="outline-button" type="button">导出备份</button>
           </div>
           <div class="storage-location">
-            <span>连接的 JSON 文件</span>
+            <span>连接的备份文件夹</span>
             <code id="fileStatus"></code>
-            <button id="saveFileFromManageButton" class="primary-button" type="button">保存到文件</button>
+            <button id="saveFileFromManageButton" class="primary-button" type="button">保存到文件夹</button>
           </div>
           <div class="manage-actions">
             <button id="editSceneButton" class="outline-button" type="button">编辑当前场景</button>
             <button id="deleteSceneButton" class="danger-button" type="button">删除当前场景</button>
           </div>
-          <p class="privacy-note">PromptHub 不上传提示词。默认数据保存在当前浏览器 IndexedDB 中；连接 JSON 文件后，点击“保存”会写回你选择的本地文件。</p>
+          <p class="privacy-note">PromptHub 不上传提示词。默认数据保存在当前浏览器 IndexedDB 中；点击“保存”会把每条提示词写成独立 JSON 并保存到你选择的本地文件夹。</p>
         </div>
       </div>
     </dialog>

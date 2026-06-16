@@ -16,8 +16,9 @@ const state = {
   search: "",
   sort: "updated",
   showAllVersions: false,
-  fileHandle: null,
-  fileName: "",
+  directoryHandle: null,
+  directoryName: "",
+  promptFileHandles: {},
   fileLastSavedAt: "",
   isDirty: false,
   deferredInstallPrompt: null,
@@ -32,6 +33,7 @@ const els = Object.fromEntries(
     "detailContent",
     "detailTitle",
     "tagList",
+    "savePromptFileButton",
     "favoritePromptButton",
     "promptMenuButton",
     "promptMenu",
@@ -131,6 +133,8 @@ function requestToPromise(request) {
 }
 
 const fileAccessSupported = "showOpenFilePicker" in window && "showSaveFilePicker" in window;
+const directoryAccessSupported = "showDirectoryPicker" in window;
+const PROMPT_EXPORT_SCHEMA_VERSION = 2;
 
 function store(name, mode = "readonly") {
   return state.db.transaction(name, mode).objectStore(name);
@@ -139,44 +143,141 @@ function store(name, mode = "readonly") {
 const getAll = (name) => requestToPromise(store(name).getAll());
 const putItem = (name, item) => requestToPromise(store(name, "readwrite").put(item));
 const deleteItem = (name, id) => requestToPromise(store(name, "readwrite").delete(id));
-const clearStore = (name) => requestToPromise(store(name, "readwrite").clear());
 
-function currentData() {
-  return {
-    scenes: state.scenes,
-    prompts: state.prompts,
-    versions: state.versions,
-  };
+function slugifyFileName(value = "prompt") {
+  const normalized = String(value)
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return (normalized || "prompt").slice(0, 80);
 }
 
-function buildPayload() {
+function promptExportFileName(prompt) {
+  return `${slugifyFileName(prompt.title)}--${prompt.id}.json`;
+}
+
+function promptBundle(prompt) {
+  const scene = state.scenes.find((item) => item.id === prompt.sceneId) || null;
   return {
     app: "PromptHub",
-    schemaVersion: 1,
+    schemaVersion: PROMPT_EXPORT_SCHEMA_VERSION,
+    type: "prompt",
     exportedAt: now(),
-    data: currentData(),
+    data: {
+      scene,
+      prompt,
+      versions: versionsForPrompt(prompt.id),
+    },
   };
 }
 
-function normalizePayload(payload) {
+function promptBundleText(prompt) {
+  return JSON.stringify(promptBundle(prompt), null, 2);
+}
+
+function normalizePromptBundle(payload) {
   const data = payload.data || payload;
+  const prompt = data.prompt || payload.prompt;
+  const versions = data.versions || payload.versions || [];
+  const scene = data.scene || payload.scene || null;
+  if (!prompt || !prompt.id || !Array.isArray(versions)) throw new Error("单个提示词 JSON 数据结构不正确");
+  return { scene, prompt, versions };
+}
+
+function normalizeImportPayload(payload) {
+  const data = payload.data || payload;
+  if (data.prompt || payload.prompt) return [normalizePromptBundle(payload)];
   if (!STORE_NAMES.every((name) => Array.isArray(data[name]))) {
     throw new Error("JSON 数据结构不正确");
   }
-  return {
-    scenes: data.scenes,
-    prompts: data.prompts,
-    versions: data.versions,
-  };
+  return data.prompts.map((prompt) => ({
+    scene: data.scenes.find((scene) => scene.id === prompt.sceneId) || null,
+    prompt,
+    versions: data.versions.filter((version) => version.promptId === prompt.id),
+  }));
 }
 
-async function replaceAllData(data) {
-  await Promise.all(STORE_NAMES.map(clearStore));
-  await Promise.all(STORE_NAMES.flatMap((name) => data[name].map((item) => putItem(name, item))));
-  state.selectedSceneId = ALL_SCENES;
-  state.selectedPromptId = null;
-  state.selectedVersionId = null;
+async function ensureSceneForBundle(scene) {
+  if (scene?.id && state.scenes.some((item) => item.id === scene.id)) return scene.id;
+  if (scene?.name) {
+    const byName = state.scenes.find((item) => item.name === scene.name);
+    if (byName) return byName.id;
+  }
+  if (scene?.name) {
+    const item = {
+      ...scene,
+      id: scene.id && !state.scenes.some((entry) => entry.id === scene.id) ? scene.id : uid(),
+      createdAt: scene.createdAt || now(),
+      updatedAt: now(),
+    };
+    await putItem("scenes", item);
+    state.scenes.push(item);
+    return item.id;
+  }
+  let fallback = state.scenes.find((item) => item.name === "其他");
+  if (!fallback) {
+    fallback = {
+      id: uid(),
+      name: "其他",
+      description: "通用与未分类提示词",
+      color: "#63708a",
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    await putItem("scenes", fallback);
+    state.scenes.push(fallback);
+  }
+  return fallback.id;
+}
+
+async function mergePromptBundles(bundles) {
+  const usedPromptIds = new Set(state.prompts.map((prompt) => prompt.id));
+  const usedVersionIds = new Set(state.versions.map((version) => version.id));
+  let imported = 0;
+  let copied = 0;
+  let lastPromptId = null;
+
+  for (const bundle of bundles) {
+    const sceneId = await ensureSceneForBundle(bundle.scene);
+    const sourcePrompt = bundle.prompt;
+    const isDuplicate = usedPromptIds.has(sourcePrompt.id);
+    const promptId = isDuplicate ? uid() : sourcePrompt.id;
+    const importedAt = now();
+    const prompt = {
+      ...sourcePrompt,
+      id: promptId,
+      sceneId,
+      title: isDuplicate ? `${sourcePrompt.title || "未命名提示词"}（副本）` : sourcePrompt.title,
+      createdAt: sourcePrompt.createdAt || importedAt,
+      updatedAt: importedAt,
+    };
+    await putItem("prompts", prompt);
+    usedPromptIds.add(prompt.id);
+
+    for (const sourceVersion of bundle.versions) {
+      const versionId = usedVersionIds.has(sourceVersion.id) || isDuplicate ? uid() : sourceVersion.id;
+      const version = {
+        ...sourceVersion,
+        id: versionId,
+        promptId,
+        createdAt: sourceVersion.createdAt || importedAt,
+        updatedAt: sourceVersion.updatedAt || importedAt,
+      };
+      await putItem("versions", version);
+      usedVersionIds.add(version.id);
+    }
+
+    imported += 1;
+    if (isDuplicate) copied += 1;
+    lastPromptId = promptId;
+  }
+
+  if (lastPromptId) state.selectedPromptId = lastPromptId;
+  markDirty();
   await refreshData();
+  return { imported, copied, lastPromptId };
 }
 
 function markDirty() {
@@ -192,11 +293,11 @@ function clearDirty(savedAt = now()) {
 
 function updateFileStatus() {
   const dirtyLabel = state.isDirty ? " · 有未保存改动" : " · 已保存";
-  const status = state.fileHandle
-    ? `${state.fileName}${dirtyLabel}${state.fileLastSavedAt ? ` · ${relativeTime(state.fileLastSavedAt)}` : ""}`
-    : fileAccessSupported
-      ? "未连接 JSON 文件，点击“保存”可选择保存位置"
-      : "当前浏览器不支持直接写入本地文件，请使用导入/导出备份";
+  const status = state.directoryHandle
+    ? `${state.directoryName}/prompthub-prompts${dirtyLabel}${state.fileLastSavedAt ? ` · ${relativeTime(state.fileLastSavedAt)}` : ""}`
+    : directoryAccessSupported
+      ? "未连接备份文件夹，点击“保存”可选择文件夹"
+      : "当前浏览器不支持直接写入文件夹，请使用导出备份";
   if (els.fileStatus) els.fileStatus.textContent = status;
   if (els.saveFileButton) {
     els.saveFileButton.title = status;
@@ -542,12 +643,145 @@ async function deleteScene() {
   await refreshData();
 }
 
-function exportJson() {
-  const payload = buildPayload();
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
+});
+
+function crc32(bytes) {
+  let value = 0xffffffff;
+  for (const byte of bytes) value = crcTable[(value ^ byte) & 0xff] ^ (value >>> 8);
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(view, offset, value) {
+  view.setUint16(offset, value, true);
+}
+
+function writeUint32(view, offset, value) {
+  view.setUint32(offset, value, true);
+}
+
+function buildZip(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const contentBytes = encoder.encode(file.content);
+    const checksum = crc32(contentBytes);
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    writeUint32(localView, 0, 0x04034b50);
+    writeUint16(localView, 4, 20);
+    writeUint16(localView, 6, 0x0800);
+    writeUint16(localView, 8, 0);
+    writeUint32(localView, 14, checksum);
+    writeUint32(localView, 18, contentBytes.length);
+    writeUint32(localView, 22, contentBytes.length);
+    writeUint16(localView, 26, nameBytes.length);
+    localHeader.set(nameBytes, 30);
+    localParts.push(localHeader, contentBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    writeUint32(centralView, 0, 0x02014b50);
+    writeUint16(centralView, 4, 20);
+    writeUint16(centralView, 6, 20);
+    writeUint16(centralView, 8, 0x0800);
+    writeUint16(centralView, 10, 0);
+    writeUint32(centralView, 16, checksum);
+    writeUint32(centralView, 20, contentBytes.length);
+    writeUint32(centralView, 24, contentBytes.length);
+    writeUint16(centralView, 28, nameBytes.length);
+    writeUint32(centralView, 42, offset);
+    centralHeader.set(nameBytes, 46);
+    centralParts.push(centralHeader);
+
+    offset += localHeader.length + contentBytes.length;
+  }
+
+  const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+  const endHeader = new Uint8Array(22);
+  const endView = new DataView(endHeader.buffer);
+  writeUint32(endView, 0, 0x06054b50);
+  writeUint16(endView, 8, files.length);
+  writeUint16(endView, 10, files.length);
+  writeUint32(endView, 12, centralSize);
+  writeUint32(endView, 16, offset);
+  return new Blob([...localParts, ...centralParts, endHeader], { type: "application/zip" });
+}
+
+async function readPromptBundlesFromZip(file) {
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+  const decoder = new TextDecoder();
+  let offset = 0;
+  const bundles = [];
+
+  while (offset + 30 <= buffer.byteLength) {
+    const signature = view.getUint32(offset, true);
+    if (signature !== 0x04034b50) break;
+    const method = view.getUint16(offset + 8, true);
+    const compressedSize = view.getUint32(offset + 18, true);
+    const fileNameLength = view.getUint16(offset + 26, true);
+    const extraLength = view.getUint16(offset + 28, true);
+    const nameStart = offset + 30;
+    const contentStart = nameStart + fileNameLength + extraLength;
+    const contentEnd = contentStart + compressedSize;
+    if (contentEnd > buffer.byteLength) throw new Error("ZIP 数据不完整");
+    const name = decoder.decode(new Uint8Array(buffer, nameStart, fileNameLength));
+    if (name.endsWith(".json") && !name.endsWith("prompthub-manifest.json")) {
+      if (method !== 0) throw new Error("暂不支持压缩过的 ZIP，请导入 PromptHub 导出的备份包或直接选择 JSON 文件");
+      const text = decoder.decode(new Uint8Array(buffer, contentStart, compressedSize));
+      bundles.push(...normalizeImportPayload(JSON.parse(text)));
+    }
+    offset = contentEnd;
+  }
+
+  if (!bundles.length) throw new Error("ZIP 中没有可导入的提示词 JSON");
+  return bundles;
+}
+
+async function readPromptBundlesFromFiles(files) {
+  const bundles = [];
+  for (const file of files) {
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith(".zip")) {
+      bundles.push(...(await readPromptBundlesFromZip(file)));
+    } else {
+      bundles.push(...normalizeImportPayload(JSON.parse(await file.text())));
+    }
+  }
+  return bundles;
+}
+
+function exportBackupZip() {
+  const files = state.prompts.map((prompt) => ({
+    name: `prompts/${promptExportFileName(prompt)}`,
+    content: promptBundleText(prompt),
+  }));
+  files.push({
+    name: "prompthub-manifest.json",
+    content: JSON.stringify(
+      {
+        app: "PromptHub",
+        schemaVersion: PROMPT_EXPORT_SCHEMA_VERSION,
+        type: "backup-manifest",
+        exportedAt: now(),
+        promptCount: state.prompts.length,
+      },
+      null,
+      2,
+    ),
+  });
+  const url = URL.createObjectURL(buildZip(files));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `prompthub-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `prompthub-${new Date().toISOString().slice(0, 10)}.zip`;
   link.click();
   URL.revokeObjectURL(url);
   localStorage.setItem(BACKUP_KEY, now());
@@ -555,16 +789,12 @@ function exportJson() {
 }
 
 async function importJson(file, options = {}) {
-  const data = normalizePayload(JSON.parse(await file.text()));
-  if (!options.skipConfirm && !confirm("导入将覆盖当前浏览器中的全部数据，继续？")) return;
-  await replaceAllData(data);
-  if (options.asWorkingFile) {
-    state.fileName = file.name;
-    clearDirty();
-  } else {
-    markDirty();
+  const bundles = await readPromptBundlesFromFiles([file]);
+  const result = await mergePromptBundles(bundles);
+  if (options.asWorkingFile && bundles.length === 1 && result.lastPromptId && options.handle) {
+    state.promptFileHandles[result.lastPromptId] = options.handle;
   }
-  showToast("数据导入完成");
+  showToast(`已导入 ${result.imported} 条提示词${result.copied ? `，${result.copied} 条另存为副本` : ""}`);
 }
 
 async function openWorkingJsonFile() {
@@ -583,41 +813,111 @@ async function openWorkingJsonFile() {
     ],
   });
   const file = await handle.getFile();
-  if (!confirm(`打开“${file.name}”会覆盖当前浏览器中的库，继续？`)) return;
-  await importJson(file, { skipConfirm: true, asWorkingFile: true });
-  state.fileHandle = handle;
-  state.fileName = file.name;
-  clearDirty(new Date(file.lastModified).toISOString());
-  showToast(`已打开 ${file.name}`);
+  await importJson(file, { asWorkingFile: true, handle });
 }
 
-async function chooseSaveFile() {
-  return window.showSaveFilePicker({
-    suggestedName: `prompthub-${new Date().toISOString().slice(0, 10)}.json`,
-    types: [
-      {
-        description: "PromptHub JSON",
-        accept: { "application/json": [".json"] },
-      },
-    ],
-  });
+async function writeTextFileHandle(handle, text) {
+  const writable = await handle.createWritable();
+  await writable.write(text);
+  await writable.close();
 }
 
-async function saveWorkingJsonFile() {
+async function savePromptJsonFile(prompt = selectedPrompt()) {
+  if (!prompt) return showToast("请先选择一条提示词");
+  const text = promptBundleText(prompt);
   if (!fileAccessSupported) {
-    exportJson();
-    showToast("当前浏览器不支持直接保存到指定文件，已改为导出备份");
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = promptExportFileName(prompt);
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("提示词 JSON 已下载");
     return;
   }
-  if (!state.fileHandle) {
-    state.fileHandle = await chooseSaveFile();
-    state.fileName = state.fileHandle.name;
+  if (!state.promptFileHandles[prompt.id]) {
+    state.promptFileHandles[prompt.id] = await window.showSaveFilePicker({
+      suggestedName: promptExportFileName(prompt),
+      types: [
+        {
+          description: "PromptHub Prompt JSON",
+          accept: { "application/json": [".json"] },
+        },
+      ],
+    });
   }
-  const writable = await state.fileHandle.createWritable();
-  await writable.write(JSON.stringify(buildPayload(), null, 2));
-  await writable.close();
-  clearDirty();
-  showToast(`已保存到 ${state.fileName}`);
+  await writeTextFileHandle(state.promptFileHandles[prompt.id], text);
+  showToast(`已保存 ${prompt.title}`);
+}
+
+async function getManagedPromptDirectory() {
+  if (!state.directoryHandle) {
+    state.directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+    state.directoryName = state.directoryHandle.name;
+  }
+  return state.directoryHandle.getDirectoryHandle("prompthub-prompts", { create: true });
+}
+
+async function fileExistsInDirectory(directory, fileName) {
+  try {
+    await directory.getFileHandle(fileName);
+    return true;
+  } catch (error) {
+    if (error.name === "NotFoundError") return false;
+    throw error;
+  }
+}
+
+async function saveAllPromptsToFolder() {
+  if (!directoryAccessSupported) {
+    showToast("当前页面不支持写入文件夹，请用 Chrome 或 Edge 在 localhost 或 HTTPS 页面打开");
+    return;
+  }
+  const directory = await getManagedPromptDirectory();
+  const files = await Promise.all(
+    state.prompts.map(async (prompt) => {
+      const fileName = promptExportFileName(prompt);
+      return {
+        prompt,
+        fileName,
+        exists: await fileExistsInDirectory(directory, fileName),
+      };
+    }),
+  );
+  const duplicateCount = files.filter((file) => file.exists).length;
+  const shouldOverwrite =
+    duplicateCount === 0 ||
+    confirm(`检测到 ${duplicateCount} 个同名提示词 JSON。点击“确定”覆盖这些文件，点击“取消”跳过重复文件。`);
+  let savedCount = 0;
+  let skippedCount = 0;
+  for (const file of files) {
+    if (file.exists && !shouldOverwrite) {
+      skippedCount += 1;
+      continue;
+    }
+    const fileHandle = await directory.getFileHandle(file.fileName, { create: true });
+    await writeTextFileHandle(fileHandle, promptBundleText(file.prompt));
+    savedCount += 1;
+  }
+  const manifestHandle = await directory.getFileHandle("prompthub-manifest.json", { create: true });
+  await writeTextFileHandle(
+    manifestHandle,
+    JSON.stringify(
+      {
+        app: "PromptHub",
+        schemaVersion: PROMPT_EXPORT_SCHEMA_VERSION,
+        type: "folder-manifest",
+        savedAt: now(),
+        promptCount: state.prompts.length,
+      },
+      null,
+      2,
+    ),
+  );
+  localStorage.setItem(BACKUP_KEY, now());
+  if (skippedCount === 0) clearDirty();
+  else updateFileStatus();
+  showToast(`已保存 ${savedCount} 条提示词到文件夹${skippedCount ? `，跳过 ${skippedCount} 条` : ""}`);
 }
 
 function openManageDialog() {
@@ -720,12 +1020,12 @@ function bindEvents() {
   });
   document.querySelector("#saveFileButton").addEventListener("click", async () => {
     try {
-      await saveWorkingJsonFile();
+      await saveAllPromptsToFolder();
     } catch (error) {
-      if (error.name !== "AbortError") showToast(error.message || "保存文件失败");
+      if (error.name !== "AbortError") showToast(error.message || "保存到文件夹失败");
     }
   });
-  document.querySelector("#exportButton").addEventListener("click", exportJson);
+  document.querySelector("#exportButton").addEventListener("click", exportBackupZip);
   document.querySelector("#installButton").addEventListener("click", async () => {
     if (!state.deferredInstallPrompt) return;
     state.deferredInstallPrompt.prompt();
@@ -737,14 +1037,21 @@ function bindEvents() {
   document.querySelector("#settingsButton").addEventListener("click", openManageDialog);
   document.querySelector("#manageButton").addEventListener("click", openManageDialog);
   els.revealStorageButton.addEventListener("click", () => {
-    exportJson();
+    exportBackupZip();
   });
   els.saveFileFromManageButton.addEventListener("click", async () => {
     try {
-      await saveWorkingJsonFile();
+      await saveAllPromptsToFolder();
       updateFileStatus();
     } catch (error) {
-      if (error.name !== "AbortError") showToast(error.message || "保存文件失败");
+      if (error.name !== "AbortError") showToast(error.message || "保存到文件夹失败");
+    }
+  });
+  els.savePromptFileButton.addEventListener("click", async () => {
+    try {
+      await savePromptJsonFile();
+    } catch (error) {
+      if (error.name !== "AbortError") showToast(error.message || "保存提示词失败");
     }
   });
   document.querySelector("#manageCloseButton").addEventListener("click", () => els.manageDialog.close());
@@ -792,10 +1099,11 @@ function bindEvents() {
     renderDetail();
   });
   els.importFile.addEventListener("change", async (event) => {
-    const [file] = event.target.files;
-    if (!file) return;
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
     try {
-      await importJson(file);
+      const result = await mergePromptBundles(await readPromptBundlesFromFiles(files));
+      showToast(`已导入 ${result.imported} 条提示词${result.copied ? `，${result.copied} 条另存为副本` : ""}`);
     } catch (error) {
       showToast(error.message || "导入失败");
     } finally {
