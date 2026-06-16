@@ -17,7 +17,7 @@ PromptHub 是一个本地优先的提示词生命周期管理工具。PWA 网页
 必须在包含 `index.html` 的 PromptHub 项目目录里启动服务：
 
 ```bash
-cd "/Users/yibo/Documents/prompt management"
+cd "/存放index.html的本地目录"
 python3 -m http.server 5173
 ```
 
