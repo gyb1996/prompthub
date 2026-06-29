@@ -283,6 +283,7 @@ pre {
 .main-shell {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
 }
 
@@ -436,10 +437,12 @@ kbd {
 .prompt-list {
   display: grid;
   align-content: start;
+  flex: 1 1 auto;
   gap: 12px;
   min-height: 0;
   overflow: auto;
   padding: 0 30px 16px;
+  overscroll-behavior: contain;
 }
 
 .prompt-card {
